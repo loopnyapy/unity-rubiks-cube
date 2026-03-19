@@ -1,5 +1,8 @@
 # Rubik's Cube — Unity Project
 
+Сделано по туториалу от [Megalomobile](https://www.youtube.com/playlist?list=PLuq_iMEtykn-ZOJyx2cY_k9WkixAhv11n) 
+с правками и доработками(например, использование Input System).
+
 ## Общие сведения
 
 | Параметр | Значение |

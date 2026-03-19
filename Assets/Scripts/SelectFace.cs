@@ -22,6 +22,9 @@ public class SelectFace : MonoBehaviour
 
     void OnLeftMousePressed()
     {
+        if (PivotRotation.IsAnyAutoRotating)
+            return;
+
         readCube.ReadState();
 
         RaycastHit hit;
@@ -43,7 +46,8 @@ public class SelectFace : MonoBehaviour
             // if the face hit exists within a side
             foreach(List<GameObject> cubeSide in cubeSides) {
                 if(cubeSide.Contains(face)) {
-                    cubeState.PickUp(cubeSide);
+                    cubeState.PickUp(cubeSide, hit.point);
+                    break;
                 }
             }
         }

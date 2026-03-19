@@ -5,14 +5,18 @@ public class PivotRotation : MonoBehaviour
 {
     private List<GameObject> activeSide;
     private Vector3 localForward;
+    private Vector3 tangentLocal; // tangent in pivot space: direction on face for "positive" rotation (rotates with face)
     private Vector3 mouseRef;
     private float sensitivity = 0.25f;
     private bool isAutoRotating = false;
+    private static int autoRotatingCount;
+
     private Quaternion targetQuaternion;
     private float speed = 300f;
 
     private ReadCube readCube;
     private CubeState cubeState;
+    private Camera mainCam;
 
     private DragDetection lmbDrag;
 
@@ -23,9 +27,10 @@ public class PivotRotation : MonoBehaviour
     {
         readCube = FindAnyObjectByType<ReadCube>();
         cubeState = FindAnyObjectByType<CubeState>();
+        mainCam = Camera.main;
 
         lmbDrag = DragDetection.Get(DragDetection.Button.LMB);
-        lmbDrag.DragCancelled += () => RotateToRightAngle();
+        lmbDrag.DragCancelled += () => { if (activeSide != null) RotateToRightAngle(); };
     }
 
     // Update is called once per frame
@@ -36,7 +41,7 @@ public class PivotRotation : MonoBehaviour
             AutoRotate();
         }
 
-        if (lmbDrag.IsDragging && activeSide != null)
+        if (lmbDrag.IsDragging && activeSide != null && !isAutoRotating)
         {
             SpinSide(activeSide);
         }
@@ -44,47 +49,57 @@ public class PivotRotation : MonoBehaviour
 
     private void SpinSide(List<GameObject> side)
     {
-        // current mouse position minus the last mouse position
-        Vector3 mouseOffset = currentMousePosition - mouseRef;
+        Vector2 mouseOffset = (Vector2)(currentMousePosition - mouseRef);
 
-        // Rotate around the computed axis for this side
-        if (side == cubeState.front)
+        // Tangent in world space (rotates with face); project to screen for consistent feel at any zoom
+        Vector3 T_world = transform.TransformDirection(tangentLocal);
+        Vector3 pivotWorld = transform.position;
+        Vector2 screenOrigin = mainCam.WorldToScreenPoint(pivotWorld);
+        Vector2 screenTangentEnd = mainCam.WorldToScreenPoint(pivotWorld + T_world);
+        Vector2 screenTangent = screenTangentEnd - screenOrigin;
+
+        float screenTangentLen = screenTangent.magnitude;
+        if (screenTangentLen > 0.001f)
         {
-            transform.Rotate(localForward, (mouseOffset.x + mouseOffset.y) * sensitivity * -1f, Space.Self);
-        }
-        if (side == cubeState.back)
-        {
-            transform.Rotate(localForward, (mouseOffset.x + mouseOffset.y) * sensitivity * -1f, Space.Self);
-        }
-        if (side == cubeState.up)
-        {
-            transform.Rotate(localForward, (mouseOffset.x + mouseOffset.y) * sensitivity * 1f, Space.Self);
-        }
-        if (side == cubeState.down)
-        {
-            transform.Rotate(localForward, (mouseOffset.x + mouseOffset.y) * sensitivity * 1f, Space.Self);
-        }
-        if (side == cubeState.left)
-        {
-            transform.Rotate(localForward, (mouseOffset.x + mouseOffset.y) * sensitivity * -1f, Space.Self);
-        }
-        if (side == cubeState.right)
-        {
-            transform.Rotate(localForward, (mouseOffset.x + mouseOffset.y) * sensitivity * 1f, Space.Self);
+            Vector2 screenTangentNorm = screenTangent / screenTangentLen;
+            float rotationDelta = Vector2.Dot(mouseOffset, screenTangentNorm) * sensitivity;
+            transform.Rotate(localForward, rotationDelta, Space.Self);
         }
 
-        // store mouse
         mouseRef = currentMousePosition;
     }
 
 
-    public void Rotate(List<GameObject> side)
+    /// <summary>Clears active side so this pivot stops reacting to drag. Call on all pivots before Rotate() on the one being picked.</summary>
+    public void ClearActiveSide()
+    {
+        activeSide = null;
+    }
+
+    public void Rotate(List<GameObject> side, Vector3 hitPointWorld)
     {
         activeSide = side;
         mouseRef = currentMousePosition;
 
-        // Create a vector to rotate around
+        // Axis to rotate around (from cube center to face center)
         localForward = Vector3.zero - side[4].transform.parent.transform.localPosition;
+
+        // Tangent in face plane at grab point: N × (P - C). Dragging along this direction on screen = positive rotation.
+        Vector3 faceCenterWorld = side[4].transform.position;
+        Vector3 N_world = transform.TransformDirection(localForward);
+        Vector3 T_world = Vector3.Cross(N_world, hitPointWorld - faceCenterWorld);
+
+        if (T_world.sqrMagnitude < 0.0001f)
+        {
+            // Hit near center: use direction from face to camera projected onto face plane
+            Vector3 toCam = (mainCam.transform.position - faceCenterWorld).normalized;
+            Vector3 inPlane = toCam - Vector3.Dot(toCam, N_world) * N_world;
+            T_world = Vector3.Cross(N_world, inPlane);
+        }
+        if (T_world.sqrMagnitude >= 0.0001f)
+            tangentLocal = transform.InverseTransformDirection(T_world.normalized);
+        else
+            tangentLocal = Vector3.right; // fallback
     }
 
     public void RotateToRightAngle()
@@ -98,7 +113,11 @@ public class PivotRotation : MonoBehaviour
 
         targetQuaternion.eulerAngles = vec;
         isAutoRotating = true;
+        autoRotatingCount++;
     }
+
+    /// <summary>True if any face is currently snapping to 90°. Don't start a new rotation until this is false.</summary>
+    public static bool IsAnyAutoRotating => autoRotatingCount > 0;
 
     private void AutoRotate()
     {
@@ -113,6 +132,7 @@ public class PivotRotation : MonoBehaviour
             readCube.ReadState();
 
             isAutoRotating = false;
+            autoRotatingCount--;
         }
     }
 }
